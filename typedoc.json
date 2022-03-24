@@ -1,0 +1,4 @@
+{
+    "entryPoints": ["src/HTTPRequestHandler.ts", "src/Response.ts"],
+    "out": "docs"
+}

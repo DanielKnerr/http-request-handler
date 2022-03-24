@@ -1,0 +1,9 @@
+node_modules
+tests
+examples
+coverage
+docs
+.eslintrc.js
+tsconfig.json
+typedoc.json
+jest.config.js
