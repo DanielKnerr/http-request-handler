@@ -2,6 +2,11 @@
     "name": "http-request-handler",
     "version": "1.0.0",
     "description": "A tiny library for parsing and handling HTTP requests.",
+    "homepage": "https://github.com/DanielKnerr/http-request-handler",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DanielKnerr/http-request-handler"
+    },
     "main": "dist/HTTPRequestHandler.js",
     "types": "dist/HTTPRequestHandler.d.ts",
     "scripts": {
@@ -9,7 +14,7 @@
         "test": "npx jest --silent false",
         "createDocs": "npx typedoc"
     },
-    "keywords": [],
+    "keywords": ["http", "requests", "routing", "server"],
     "author": "Daniel Knerr",
     "license": "MIT",
     "devDependencies": {
