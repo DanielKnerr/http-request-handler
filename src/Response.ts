@@ -64,8 +64,6 @@ export class Response {
      * @param value the value of the header, either as a string or as a string array
      */
     setHeader(key: string, value: string | string[]) {
-        console.log(key, value);
-        
         if (checkHeaderToken(key) && checkHeaderToken(value)) {
             this.#headersToSet[key] = value;
         } else {
@@ -197,8 +195,6 @@ export class Response {
 
             if (error) {
                 this.#httpResponse.setHeader("Content-Type", "text/plain; charset=UTF-8");
-                // TODO: unified system to error out:
-                // respond not just with the code, also with an error text
                 content = "500 Internal Server Error";
                 logError("Can't respond with a buffer if no MIME-type is specified");
             }

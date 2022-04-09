@@ -2,6 +2,9 @@ import http from "http";
 import { Response } from "./Response";
 import { doURLsMatch } from "./RouteMatcher";
 import { logError } from "./util";
+import mime from "mime-types";
+import fs from "fs";
+import path from "path";
 export * from "./MiddlewareFunctions";
 
 /**
@@ -86,9 +89,12 @@ export type Options = {
     endpoint: string
 };
 
+enum RouteType { STATIC_FOLDER, STATIC_FILE, HANDLER }
+
 type Route = {
     method: HttpMethod, path: string,
-    middleware: MiddlewareFunction[], handler: HandlerFunction
+    middleware: MiddlewareFunction[], handler: HandlerFunction,
+    type: RouteType
 };
 
 export class HTTPRequestHandler {
@@ -180,6 +186,10 @@ export class HTTPRequestHandler {
 
             if (httpRequest.url.indexOf(this.#options.endpoint) === 0) {
                 for (const route of this.#routeMapping) {
+                    if (route.type !== RouteType.HANDLER) {
+                        return;
+                    }
+
                     const urlMatch = doURLsMatch(httpRequest.url.substring(this.#options.endpoint.length), route.path);
 
                     if (urlMatch.match) {
@@ -269,10 +279,46 @@ export class HTTPRequestHandler {
                                 } else {
                                     logError("An error occured when executing a middleware function for route '" + route.path + "'");
                                     console.log(errorCode);
-                                    
+
                                     response.error(500);
                                 }
                             }
+                        }
+                    }
+                }
+            } else {
+                // the requested url does not start with the endpoint, does it match a static route?
+                for (const route of this.#routeMapping) {
+                    if (route.type === RouteType.STATIC_FOLDER) {
+                        if (httpRequest.url.indexOf(route.path) === 0) {
+                            const request: Request = {
+                                body: "",
+                                cookies: {},
+                                headers: {},
+                                method: 0,
+                                url: httpRequest.url,
+                                urlParameters: {}
+                            };
+                            route.handler(request, response, {});
+                            found = true;
+                            break;
+                        }
+                    } else if (route.type === RouteType.STATIC_FILE) {
+                        const requestPath = httpRequest.url.endsWith("/") ? httpRequest.url.slice(0, -1) : httpRequest.url;
+                        const routePath = route.path.endsWith("/") ? route.path.slice(0, -1) : route.path;
+
+                        if (requestPath === routePath) {
+                            const request: Request = {
+                                body: "",
+                                cookies: {},
+                                headers: {},
+                                method: 0,
+                                url: "",
+                                urlParameters: {}
+                            };
+                            route.handler(request, response, {});
+                            found = true;
+                            break;
                         }
                     }
                 }
@@ -331,9 +377,87 @@ export class HTTPRequestHandler {
         }
 
         if (path[0] === "/") {
-            this.#routeMapping.push({ method, path, middleware: middlewareFunctions, handler });
+            this.#routeMapping.push({ method, path, middleware: middlewareFunctions, handler, type: RouteType.HANDLER });
         } else {
-            this.#routeMapping.push({ method, path: "/" + path, middleware: middlewareFunctions, handler });
+            this.#routeMapping.push({ method, path: "/" + path, middleware: middlewareFunctions, handler, type: RouteType.HANDLER });
+        }
+    }
+
+    #doesPathConflictWithEndpoint(url: string): boolean {
+        // make sure that the url does not start with the endpoint
+        const endpointParts = this.#options.endpoint.split("/");
+        const urlParts = url.split("/");
+
+        // the endpoint always starts with a slash, so the first element is an empty string
+        endpointParts.shift();
+        if (url.startsWith("/")) urlParts.shift();
+
+        let matchesEndpoint = false;
+        for (let i = 0; i < endpointParts.length; i++) {
+            if (!(urlParts[i] === undefined || endpointParts[i] != urlParts[i])) {
+                matchesEndpoint = true;
+                break;
+            }
+        }
+        return matchesEndpoint;
+    }
+
+    /**
+     * This function will make the a file available under a specified url.
+     * The api-endpoint specified in the options will be ignored.
+     * @param url under what url the file will be available. Must be different from the endpoint specified in the options.
+     * @param middlewareFunctions
+     * @param filePath path to the file
+     */
+    mountStaticFile(url: string, middlewareFunctions: MiddlewareFunction[], filePath: string): void {
+        const matchesEndpoint = this.#doesPathConflictWithEndpoint(url);
+        if (matchesEndpoint) {
+            logError(`The requested static path '${url}' collides with the api endpoint '${this.#options.endpoint}'`);
+            return;
+        } else {
+            this.#routeMapping.push({
+                method: HttpMethod.HTTP_GET, path: url, middleware: middlewareFunctions, type: RouteType.STATIC_FILE,
+                handler: (request, response) => {
+                    fs.readFile(filePath, (err, buffer) => {
+                        const mimeType = mime.lookup(filePath) || "application/octet-stream";
+                        response.send(buffer, mimeType);
+                    });
+                }
+            });
+        }
+    }
+
+    /**
+     * This function will make the contents of a folder available under a specified url endpoint.
+     * The api-endpoint specified in the options will be ignored.
+     * @param url under what url the contents of the folder will be available. Must be different from the endpoint specified in the options.
+     * @param middlewareFunctions
+     * @param folderPath path to the folder
+     */
+    mountStaticFolder(url: string, middlewareFunctions: MiddlewareFunction[], folderPath: string): void {
+        const matchesEndpoint = this.#doesPathConflictWithEndpoint(url);
+        if (matchesEndpoint) {
+            logError(`The requested static path '${url}' collides with the api endpoint '${this.#options.endpoint}'`);
+            return;
+        } else {
+            this.#routeMapping.push({
+                method: HttpMethod.HTTP_GET, path: url, middleware: middlewareFunctions, type: RouteType.STATIC_FOLDER,
+                handler: (request, response) => {
+                    const file = request.url.substring(url.length);
+
+                    let filePath = path.join(folderPath, file);
+                    if (file === "" || file === "/") {
+                        if (fs.existsSync(filePath)) {
+                            filePath = path.join(folderPath, "index.html");
+                        }
+                    }
+
+                    fs.readFile(filePath, (err, buffer) => {
+                        const mimeType = mime.lookup(filePath) || "application/octet-stream";
+                        response.send(buffer, mimeType);
+                    });
+                }
+            });
         }
     }
 
