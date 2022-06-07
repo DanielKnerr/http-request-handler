@@ -185,12 +185,14 @@ export class HTTPRequestHandler {
             let matchedPath = "";
 
             if (httpRequest.url.indexOf(this.#options.endpoint) === 0) {
+                let urlWithoutEndpoint = httpRequest.url.substring(this.#options.endpoint.length);
+                
                 for (const route of this.#routeMapping) {
                     if (route.type !== RouteType.HANDLER) {
-                        return;
+                        continue;
                     }
 
-                    const urlMatch = doURLsMatch(httpRequest.url.substring(this.#options.endpoint.length), route.path);
+                    const urlMatch = doURLsMatch(urlWithoutEndpoint, route.path);
 
                     if (urlMatch.match) {
                         if (found) {
@@ -286,7 +288,10 @@ export class HTTPRequestHandler {
                         }
                     }
                 }
-            } else {
+            }
+            
+            if (this.#options.endpoint === "/" || (this.#options.endpoint !== "/" && httpRequest.url.indexOf(this.#options.endpoint) !== 0)) {
+                
                 // the requested url does not start with the endpoint, does it match a static route?
                 for (const route of this.#routeMapping) {
                     if (route.type === RouteType.STATIC_FOLDER) {
