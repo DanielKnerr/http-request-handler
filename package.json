@@ -1,6 +1,6 @@
 {
     "name": "http-request-handler",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "A tiny library for parsing and handling HTTP requests.",
     "homepage": "https://github.com/DanielKnerr/http-request-handler",
     "repository": {
