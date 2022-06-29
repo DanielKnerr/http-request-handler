@@ -224,7 +224,7 @@ export class HTTPRequestHandler {
 
                     const urlMatch = doURLsMatch(baseURL, route.path);
 
-                    if (urlMatch.match) {
+                    if (urlMatch.match && route.method === decodeMethod(httpRequest.method)) {
                         if (found) {
                             logError("The URL '" + httpRequest.url + "' was already matched to '" + matchedPath + "', but '" + route.path + "' is also a match");
                         } else {
