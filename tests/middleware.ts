@@ -1,4 +1,4 @@
-import http from "http";
+import * as http from "http";
 import { cleanupServer, setupServer } from "./util";
 import request from "supertest";
 import { HttpMethod, MiddlewareFunction } from "../src/HTTPRequestHandler";

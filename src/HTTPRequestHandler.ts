@@ -1,10 +1,11 @@
-import http from "http";
+import * as http from "http";
 import { Response } from "./Response";
 import { doURLsMatch } from "./RouteMatcher";
 import { logError } from "./util";
 import mime from "mime-types";
 import fs from "fs";
 import path from "path";
+import * as pug from "pug";
 export * from "./MiddlewareFunctions";
 
 /**
@@ -28,6 +29,8 @@ export type Request = {
     method: HttpMethod,
     // the user is not allowed to define multiple urlParameters with the same name
     urlParameters: StringObject,
+    // the ?key1=value1&key2=value2 pairs in the URL
+    urlArguments: StringObject,
     // there can be multiple headers with the same name (sent as an array)
     headers: StringObject,
     // there will never be multiple cookies with the same name, the browser chooses only one cookie
@@ -113,6 +116,8 @@ export class HTTPRequestHandler {
      */
     #globalMiddlewareFunctions: MiddlewareFunction[] = [];
 
+    #pugTemplateMap: Map<string, pug.compileTemplate> = new Map();
+
     constructor(options?: Partial<Options>) {
         if (typeof options === "object") {
             // merge options
@@ -174,11 +179,34 @@ export class HTTPRequestHandler {
         });
     }
 
+
+    #splitURL(url: string): {url: string, arguments: StringObject} {
+        let ret: StringObject = {};
+        let s = url.split("?");
+        let baseURL = s[0];
+        if (s.length > 1 && s[1].length > 1) {
+            s.shift();
+            let a = s.join("?");
+            let b = a.split("&");
+            b.forEach((v) => {
+                let [key, value] = v.split("=");
+                if (key !== undefined) {
+                    ret[key] = value !== undefined ? value : "";
+                }
+            });
+        }
+
+        return {
+            url: baseURL,
+            arguments: ret
+        };
+    }
+
     /**
      * @ignore
      */
     async #executeMatchingRoutes(httpRequest: http.IncomingMessage, httpResponse: http.ServerResponse) {
-        const response = new Response(httpResponse);
+        const response = new Response(httpResponse, this.#pugTemplateMap);
 
         if (httpRequest.url && httpRequest.method) {
             let found = false;
@@ -186,13 +214,15 @@ export class HTTPRequestHandler {
 
             if (httpRequest.url.indexOf(this.#options.endpoint) === 0) {
                 let urlWithoutEndpoint = httpRequest.url.substring(this.#options.endpoint.length);
-                
+
+                let {url: baseURL, arguments: urlArguments} = this.#splitURL(urlWithoutEndpoint);
+
                 for (const route of this.#routeMapping) {
                     if (route.type !== RouteType.HANDLER) {
                         continue;
                     }
 
-                    const urlMatch = doURLsMatch(urlWithoutEndpoint, route.path);
+                    const urlMatch = doURLsMatch(baseURL, route.path);
 
                     if (urlMatch.match) {
                         if (found) {
@@ -216,6 +246,7 @@ export class HTTPRequestHandler {
                             const request: Request = {
                                 url: httpRequest.url,
                                 urlParameters: urlMatch.urlParameters,
+                                urlArguments: urlArguments,
                                 method: decodeMethod(httpRequest.method),
                                 headers: headers,
                                 cookies: this.#parseCookies(headers.cookie),
@@ -302,7 +333,8 @@ export class HTTPRequestHandler {
                                 headers: {},
                                 method: 0,
                                 url: httpRequest.url,
-                                urlParameters: {}
+                                urlParameters: {},
+                                urlArguments: {}
                             };
                             route.handler(request, response, {});
                             found = true;
@@ -319,7 +351,8 @@ export class HTTPRequestHandler {
                                 headers: {},
                                 method: 0,
                                 url: "",
-                                urlParameters: {}
+                                urlParameters: {},
+                                urlArguments: {}
                             };
                             route.handler(request, response, {});
                             found = true;
@@ -336,6 +369,23 @@ export class HTTPRequestHandler {
             response.error(500);
         }
 
+    }
+
+    #loadPugTemplatesWithPrefix(folder: fs.PathLike, prefix: string) {
+        fs.readdirSync(folder).forEach(file => {
+            let fullPath = path.join(folder.toString(), file);
+            if (fs.lstatSync(fullPath).isDirectory()) {
+                this.#loadPugTemplatesWithPrefix(fullPath, prefix + file + "/");
+            } else {
+                let templateName = path.parse(file).name;
+                this.#pugTemplateMap.set(prefix + templateName, pug.compileFile(fullPath));
+            }
+        });
+    }
+
+    loadPugTemplates(folder: string) {
+        this.#loadPugTemplatesWithPrefix(folder, "");
+        console.log(this.#pugTemplateMap.keys());
     }
 
     /**
@@ -425,7 +475,7 @@ export class HTTPRequestHandler {
                 handler: (request, response) => {
                     fs.readFile(filePath, (err, buffer) => {
                         const mimeType = mime.lookup(filePath) || "application/octet-stream";
-                        response.send(buffer, mimeType);
+                        response.send(buffer, {contentType: mimeType});
                     });
                 }
             });
@@ -459,7 +509,7 @@ export class HTTPRequestHandler {
 
                     fs.readFile(filePath, (err, buffer) => {
                         const mimeType = mime.lookup(filePath) || "application/octet-stream";
-                        response.send(buffer, mimeType);
+                        response.send(buffer, {contentType: mimeType});
                     });
                 }
             });

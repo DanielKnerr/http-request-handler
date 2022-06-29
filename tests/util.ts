@@ -1,5 +1,5 @@
 import { Options, HTTPRequestHandler } from "../src/HTTPRequestHandler";
-import http from "http";
+import * as http from "http";
 
 export function setupServer(opts?: Partial<Options>): Promise<{ handler: HTTPRequestHandler, server: http.Server }> {
     const handler = new HTTPRequestHandler(opts);

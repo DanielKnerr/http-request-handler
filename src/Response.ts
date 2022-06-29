@@ -1,5 +1,6 @@
-import http from "http";
+import * as http from "http";
 import { checkHeaderToken, logError } from "./util";
+import * as pug from "pug";
 
 type CookieOptions = {
     Expires: Date,
@@ -9,6 +10,15 @@ type CookieOptions = {
     Secure: boolean,
     HttpOnly: boolean,
     SameSite: "Strict" | "Lax" | "None"
+}
+
+type ResponseOptions = {
+    contentType: string,
+    code: number
+}
+
+interface BufferOptions extends Partial<ResponseOptions> {
+    contentType: string
 }
 
 export class Response {
@@ -40,11 +50,15 @@ export class Response {
      */
     #sendCallback: ((a: void) => void) | undefined;
 
+
+    #pugTemplateMap: Map<string, pug.compileTemplate>;
+
     /**
      * @ignore
      */
-    constructor(httpResponse: http.ServerResponse) {
+    constructor(httpResponse: http.ServerResponse, pugTemplateMap: Map<string, pug.compileTemplate>) {
         this.#httpResponse = httpResponse;
+        this.#pugTemplateMap = pugTemplateMap;
     }
 
     /**
@@ -110,6 +124,9 @@ export class Response {
      */
     error(errorCode: number) {
         if (!this.#responseSent) {
+            this.#responseSent = true;
+            this.#applyCookiesAndHeaders();
+
             this.#httpResponse.writeHead(errorCode);
             const errorString = this.#errorCodeStringMap.get(errorCode);
             if (errorString !== undefined) {
@@ -125,44 +142,58 @@ export class Response {
      * Sends an empty response with a 200 HTTP code to the client.
      */
     ok() {
-        this.send();
+        this.send("ok");
+    }
+
+    renderPugTemplate(name: string, values: Object = {}) {
+        let fn = this.#pugTemplateMap.get(name);
+        if (typeof fn !== "undefined") {
+            let html = fn(values);
+            this.send(html, {contentType: "text/html"});
+        } else {
+            logError(`Pug template "${name}" does not exist.`);
+        }
+    }
+
+    redirect(str: string) {
+        this.#httpResponse.writeHead(301, {
+            "Location": str
+        });
+        this.#httpResponse.end();
+    }
+
+    #applyCookiesAndHeaders() {
+        if (this.#cookiesToSet.length > 0) {
+            const cookieHeaders = [];
+            for (const cookie of this.#cookiesToSet) {
+                cookieHeaders.push(cookie.key + "=" + cookie.value);
+            }
+            this.#httpResponse.setHeader("Set-Cookie", cookieHeaders);
+        }
+
+        for (const key in this.#headersToSet) {
+            this.#httpResponse.setHeader(key, this.#headersToSet[key]);
+        }
     }
 
     /**
      * Send data to the client. If no data is provided an empty string will be sent. This function can only be called once.
      * @param data what data to send
      */
-    send(data?: string | number | boolean | object): void;
-    /**
-     * Send data to the client. If no data is provided an empty string will be sent. This function can only be called once.
-     * @param data what data to send
-     * @param httpCode what HTTP code to send
-     */
-    send(data: string | number | boolean | object, httpCode: number): void;
+    send(data: string | number | boolean | object, options?: Partial<ResponseOptions>): void;
     /**
      * Send a buffer to the client.
      * @param data the buffer containing the data
      * @param mimeType a string containing the MIME-type
      */
-    send(data: Buffer, mimeType: string): void;
-    send(data: string | number | boolean | object | Buffer, arg1?: string | number): void {
+    send(data: Buffer, options: BufferOptions): void;
+    send(data: string | number | boolean | object | Buffer, options?: Partial<ResponseOptions>): void {
         if (!this.#responseSent) {
             this.#responseSent = true;
 
             // set an array as the value to send multiple headers with the same name
             // see https://nodejs.org/dist/latest-v8.x/docs/api/http.html#http_response_setheader_name_value
-
-            if (this.#cookiesToSet.length > 0) {
-                const cookieHeaders = [];
-                for (const cookie of this.#cookiesToSet) {
-                    cookieHeaders.push(cookie.key + "=" + cookie.value);
-                }
-                this.#httpResponse.setHeader("Set-Cookie", cookieHeaders);
-            }
-
-            for (const key in this.#headersToSet) {
-                this.#httpResponse.setHeader(key, this.#headersToSet[key]);
-            }
+            this.#applyCookiesAndHeaders();
 
             let error = false;
 
@@ -170,7 +201,12 @@ export class Response {
             if (data !== undefined) {
                 if (typeof data === "string") {
                     content = data;
-                    this.#httpResponse.setHeader("Content-Type", "text/plain; charset=UTF-8");
+
+                    if (typeof options?.contentType !== "undefined") {
+                        this.#httpResponse.setHeader("Content-Type", options.contentType + ";");
+                    } else {
+                        this.#httpResponse.setHeader("Content-Type", "text/plain; charset=UTF-8");
+                    }
                 } else if (typeof data === "number") {
                     content = data.toString();
                     this.#httpResponse.setHeader("Content-Type", "text/plain; charset=UTF-8");
@@ -180,10 +216,10 @@ export class Response {
                 } else if ((data as unknown) instanceof Buffer) {
                     content = data as Buffer;
 
-                    if (typeof arg1 === "string") {
-                        this.#httpResponse.setHeader("Content-Type", (arg1 as string) + ";");
+                    if (typeof options?.contentType !== "undefined") {
+                        this.#httpResponse.setHeader("Content-Type", (options.contentType as string) + ";");
                     } else {
-                        logError("When responding with a Buffer a MIME-type must be provided to Response.send");
+                        logError("When responding with a Buffer a MIME-type (Content-Type) must be provided to Response.send");
                         error = true;
                     }
 
@@ -201,9 +237,8 @@ export class Response {
 
             this.#httpResponse.setHeader("Content-Length", content.length);
 
-
-            if (typeof arg1 === "number") {
-                this.#httpResponse.writeHead(arg1);
+            if (typeof options?.code !== "undefined") {
+                this.#httpResponse.writeHead(options.code);
             }
 
             if (error) {
